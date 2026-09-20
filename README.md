@@ -2,6 +2,10 @@
 
 > *"you can sleep peacefully in your lectures now"*
 
+> [!WARNING]
+> **Academic Policy & Recording Consent Notice**:
+> This tool is intended strictly for personal study, review, and accessibility note-taking. Before recording audio in lectures, ensure compliance with your university's academic regulations, student code of conduct, and regional privacy laws. Always obtain explicit permission or consent from your course instructor prior to recording in-class sessions.
+
 A lightweight, terminal-native live lecture recorder and real-time speech transcriber. Captures audio directly from your laptop microphone, streams live transcriptions with timestamps to your console, auto-saves every sentence to disk in real-time, and generates structured post-lecture study recaps (definitions, formulas, and exam takeaways).
 
 ---
