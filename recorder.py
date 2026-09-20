@@ -68,14 +68,19 @@ class AudioRecorder:
         """Returns recording status, usable both as property or method: is_recording or is_recording()."""
         return CallableBool(self._is_recording)
 
-    def start(self) -> Path:
+    def start(self, filename_prefix: Optional[str] = None) -> Path:
         """Starts recording audio in a background thread."""
         if self._is_recording:
             raise RuntimeError("AudioRecorder is already recording.")
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_wav_path = self.output_dir / f"lecture_{timestamp}.wav"
+        if filename_prefix:
+            import re
+            safe_prefix = re.sub(r'[^\w\-_]+', '_', filename_prefix.strip()).strip('_')
+            self.current_wav_path = self.output_dir / f"{safe_prefix}_{timestamp}.wav"
+        else:
+            self.current_wav_path = self.output_dir / f"lecture_{timestamp}.wav"
 
         # Initialize PyAudio
         self._pyaudio = pyaudio.PyAudio()

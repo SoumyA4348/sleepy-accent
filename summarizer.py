@@ -453,6 +453,8 @@ class StudyNoteGenerator:
             # Parse header metadata
             if line_str.startswith("- **Audio Recording:**"):
                 metadata["audio"] = line_str.split("`")[1] if "`" in line_str else ""
+            elif line_str.startswith("- **Course / Topic:**"):
+                metadata["course"] = line_str.replace("- **Course / Topic:**", "").strip()
             elif line_str.startswith("- **Date:**"):
                 metadata["date"] = line_str.replace("- **Date:**", "").strip()
             elif line_str.startswith("- **Speaker:**"):
@@ -505,13 +507,18 @@ class StudyNoteGenerator:
                 corrected_phrases, all_corrections
             )
 
-        # Construct final Study Note Markdown Document
+        # Construct final Study Recap Markdown Document
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lecture_date = metadata.get("date", now_str)
         speaker = metadata.get("speaker", "Professor")
+        course = metadata.get("course")
+
+        title_display = course if course else source_path.stem
+        course_line = f"- **Course / Topic:** {course}\n" if course else ""
 
         study_note_doc = (
-            f"# Post-Lecture Study Notes: {source_path.stem}\n\n"
+            f"# Post-Lecture Study Recap: {title_display}\n\n"
+            f"{course_line}"
             f"- **Source Transcript:** `{source_path.name}`\n"
             f"- **Lecture Date:** {lecture_date}\n"
             f"- **Speaker:** {speaker}\n"
@@ -525,7 +532,12 @@ class StudyNoteGenerator:
         if output_path is not None:
             target_file = Path(output_path)
         else:
-            stem = source_path.stem.replace("lecture_", "study_note_")
+            if source_path.stem.startswith("lecture_"):
+                stem = source_path.stem.replace("lecture_", "study_recap_", 1)
+            elif source_path.stem.startswith("study_note_"):
+                stem = source_path.stem.replace("study_note_", "study_recap_", 1)
+            else:
+                stem = f"study_recap_{source_path.stem}"
             target_file = self.output_dir / f"{stem}.md"
 
         target_file.write_text(study_note_doc, encoding="utf-8")

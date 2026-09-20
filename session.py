@@ -29,25 +29,36 @@ class LiveSession:
     def __init__(
         self,
         output_dir: str | Path = "lectures",
+        title: Optional[str] = None,
         speaker: str = "Professor",
         sample_rate: int = 16000,
         language: str = "en-US",
         calibration_duration: float = 1.5,
         audio_dir: Optional[str | Path] = None,
         notes_dir: Optional[str | Path] = None,
+        study_notes_dir: Optional[str | Path] = None,
         auto_summarize: bool = True,
+        summarizer_provider: str = "auto",
+        summarizer_api_key: Optional[str] = None,
+        summarizer_model: Optional[str] = None,
     ):
         self.base_dir = Path(output_dir)
+        self.title = title.strip() if title and title.strip() else None
         self.speaker = speaker
         self.sample_rate = sample_rate
         self.language = language
         self.calibration_duration = calibration_duration
         self.auto_summarize = auto_summarize
+        self.summarizer_provider = summarizer_provider
+        self.summarizer_api_key = summarizer_api_key
+        self.summarizer_model = summarizer_model
 
         # Route audio and notes to their respective subdirectories
         self.audio_dir = Path(audio_dir) if audio_dir is not None else self.base_dir / "audio"
         self.notes_dir = Path(notes_dir) if notes_dir is not None else self.base_dir / "notes"
-        self.study_notes_dir = self.base_dir / "study_notes"
+        self.study_notes_dir = (
+            Path(study_notes_dir) if study_notes_dir is not None else self.base_dir / "study_notes"
+        )
 
         self.audio_queue: queue.Queue = queue.Queue()
         self.recorder = AudioRecorder(
@@ -134,24 +145,31 @@ class LiveSession:
         self._start_time = time.time()
         self.sentence_count = 0
 
-        # Start audio recording -> lectures/audio/lecture_<timestamp>.wav
-        self.wav_path = self.recorder.start()
+        # Start audio recording
+        prefix = f"lecture_{self.title}" if self.title else "lecture"
+        self.wav_path = self.recorder.start(filename_prefix=prefix)
 
-        # Save markdown notes -> lectures/notes/lecture_<timestamp>.md
+        # Save markdown notes -> lectures/notes/<filename>.md
         self.md_path = self.notes_dir / f"{self.wav_path.stem}.md"
 
         # Initialize markdown file with session metadata header
         self._md_file = open(self.md_path, "w", encoding="utf-8")
-        header_text = (
-            f"# Lecture Notes - {self._start_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"- **Audio Recording:** `{self.wav_path.as_posix()}`\n"
-            f"- **Date:** {self._start_datetime.strftime('%A, %B %d, %Y')}\n"
-            f"- **Session Started:** {self._start_datetime.strftime('%H:%M:%S')}\n"
-            f"- **Speaker:** {self.speaker}\n"
-            f"- **Language:** {self.language}\n\n"
-            f"---\n\n"
-            f"## Live Transcript\n\n"
-        )
+        title_str = self.title if self.title else f"Lecture Notes - {self._start_datetime.strftime('%Y-%m-%d %H:%M:%S')}"
+        header_lines = [
+            f"# {title_str}\n",
+        ]
+        if self.title:
+            header_lines.append(f"- **Course / Topic:** {self.title}")
+        header_lines.extend([
+            f"- **Audio Recording:** `{self.wav_path.as_posix()}`",
+            f"- **Date:** {self._start_datetime.strftime('%A, %B %d, %Y')}",
+            f"- **Session Started:** {self._start_datetime.strftime('%H:%M:%S')}",
+            f"- **Speaker:** {self.speaker}",
+            f"- **Language:** {self.language}\n",
+            f"---\n",
+            f"## Live Transcript\n\n",
+        ])
+        header_text = "\n".join(header_lines)
         self._md_file.write(header_text)
         self._md_file.flush()
         try:
@@ -209,7 +227,12 @@ class LiveSession:
         if self.auto_summarize and self.md_path and self.md_path.exists():
             try:
                 from summarizer import StudyNoteGenerator
-                generator = StudyNoteGenerator(output_dir=self.study_notes_dir)
+                generator = StudyNoteGenerator(
+                    output_dir=self.study_notes_dir,
+                    provider=self.summarizer_provider,
+                    api_key=self.summarizer_api_key,
+                    model_name=self.summarizer_model,
+                )
                 self.study_notes_path = generator.generate_from_file(self.md_path)
             except Exception as e:
                 print(f"\n[Warning] Could not auto-generate study notes: {e}")
@@ -257,6 +280,13 @@ def main():
         help="Ambient noise calibration duration in seconds (default: 1.5)",
     )
     parser.add_argument(
+        "--title",
+        "-t",
+        type=str,
+        default=None,
+        help="Lecture name or course title (e.g. CIS2520 - Data Structures)",
+    )
+    parser.add_argument(
         "--no-study-notes",
         action="store_true",
         help="Disable automatic post-lecture study note generation",
@@ -266,6 +296,7 @@ def main():
 
     session = LiveSession(
         output_dir=args.output_dir,
+        title=args.title,
         speaker=args.speaker,
         language=args.language,
         calibration_duration=args.calibrate_sec,
