@@ -57,6 +57,41 @@ def compute_rms(audio_chunk: bytes) -> float:
     return float(np.sqrt(mean_sq))
 
 
+def boost_and_normalize_audio(
+    audio_bytes: bytes,
+    target_peak: float = 24000.0,
+    max_gain: float = 8.0,
+    remove_dc_offset: bool = True,
+) -> bytes:
+    """Amplifies soft or distant speech to an optimal amplitude for speech recognition.
+
+    1. Removes DC offset and sub-audible low-frequency rumble (HVAC drift).
+    2. Measures peak amplitude of speech phonemes.
+    3. Dynamically calculates and applies gain (up to max_gain multiplier).
+    4. Soft-clips to prevent 16-bit PCM integer overflow or distortion.
+    """
+    if not audio_bytes:
+        return audio_bytes
+
+    samples = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+    if len(samples) == 0:
+        return audio_bytes
+
+    if remove_dc_offset:
+        # Subtract mean to remove microphone bias and sub-audible low rumble
+        samples = samples - np.mean(samples)
+
+    current_peak = float(np.max(np.abs(samples)))
+    # If the chunk is non-silent (peak above basic noise floor)
+    if current_peak > 35.0:
+        gain = min(max_gain, target_peak / max(current_peak, 1.0))
+        if gain > 1.0:
+            samples = samples * gain
+
+    clipped = np.clip(samples, -32767.0, 32767.0).astype(np.int16)
+    return clipped.tobytes()
+
+
 class LiveTranscriber:
     """Consumes audio segments from an in-memory queue and transcribes speech
 
@@ -75,6 +110,8 @@ class LiveTranscriber:
         pause_threshold: float = 0.85,
         max_phrase_duration: float = 12.0,
         language: str = "en-US",
+        boost_distant: bool = True,
+        max_gain: float = 8.0,
         on_text: Optional[Callable] = None,
         on_phrase: Optional[Callable[[str, str], None]] = None,
         session_start_time: Optional[float] = None,
@@ -93,6 +130,8 @@ class LiveTranscriber:
         pause_threshold: Seconds of silence marking the end of a spoken phrase.
         max_phrase_duration: Maximum utterance length in seconds before segmenting.
         language: BCP-47 language tag for transcription (default: 'en-US').
+        boost_distant: Enables automatic gain control (AGC) and normalization for soft/distant voices.
+        max_gain: Maximum dynamic gain boost multiplier for distant voices (default: 8.0x).
         on_text: Optional callback invoked with transcribed phrase/text.
         on_phrase: Optional callback invoked with (timestamp_offset, text).
         session_start_time: Optional session start epoch time (time.time()) for computing offsets.
@@ -104,7 +143,10 @@ class LiveTranscriber:
         self.chunk_duration = chunk_size / sample_rate
 
         self.calibration_duration = calibration_duration
-        self.energy_ratio = energy_ratio
+        self.boost_distant = boost_distant
+        self.max_gain = max_gain
+        # Sensitive trigger threshold for distant/soft professor voices if boost is enabled
+        self.energy_ratio = 1.35 if (boost_distant and energy_ratio == 1.7) else energy_ratio
         self.min_speech_duration = min_speech_duration
         self.pause_threshold = pause_threshold
         self.max_phrase_duration = max_phrase_duration
@@ -293,6 +335,12 @@ class LiveTranscriber:
                 phrase_start_time, audio_bytes = time.time(), item
 
             try:
+                # Apply automatic gain control / normalization for soft/distant speech
+                if self.boost_distant:
+                    audio_bytes = boost_and_normalize_audio(
+                        audio_bytes, max_gain=self.max_gain
+                    )
+
                 audio_data = sr.AudioData(
                     audio_bytes,
                     sample_rate=self.sample_rate,

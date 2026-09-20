@@ -196,6 +196,17 @@ def run_cli():
         help="Disable automatic generation of post-lecture study recap",
     )
     parser.add_argument(
+        "--no-boost",
+        action="store_true",
+        help="Disable automatic gain control (AGC) and soft/distant voice boosting",
+    )
+    parser.add_argument(
+        "--max-gain",
+        type=float,
+        default=8.0,
+        help="Maximum gain boost multiplier for distant voices (default: 8.0x)",
+    )
+    parser.add_argument(
         "--yes",
         "-y",
         action="store_true",
@@ -223,15 +234,18 @@ def run_cli():
         calibration_duration=args.calibrate_sec,
         auto_summarize=not args.no_recap,
         summarizer_provider=args.provider,
+        boost_distant=not args.no_boost,
+        max_gain=args.max_gain,
     )
 
     # Start audio capture & continuous transcript file
     wav_path, md_path = session.start()
 
+    boost_status = f"ACTIVE ({args.max_gain:.1f}x max AGC)" if not args.no_boost else "OFF"
     print(
         Fore.GREEN
         + f"[+] Microphone calibrated (Ambient RMS: {session.transcriber.ambient_energy:.1f}, "
-        + f"Trigger RMS: {session.transcriber.speech_threshold:.1f})"
+        + f"Trigger RMS: {session.transcriber.speech_threshold:.1f}, Voice Booster: {boost_status})"
     )
     print(Style.DIM + f"    • Audio file:      {wav_path}")
     print(Style.DIM + f"    • Live auto-save:  {md_path}")

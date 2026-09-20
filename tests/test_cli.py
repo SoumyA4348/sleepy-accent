@@ -164,3 +164,40 @@ def test_run_cli_full_cycle(tmp_path, monkeypatch, capsys):
         assert "CIS2520 - Data Structures" in captured
         assert "LECTURE STUDY RECAP COMPLETE" in captured
 
+
+def test_boost_and_normalize_audio():
+    """Verifies that quiet speech chunks are amplified up to max_gain while preserving limits."""
+    import numpy as np
+    from transcriber import boost_and_normalize_audio
+
+    # Create a low-amplitude sine wave simulating a distant professor (peak = 2000)
+    t = np.linspace(0, 1, 16000, endpoint=False)
+    quiet_samples = (2000.0 * np.sin(2 * np.pi * 440 * t)).astype(np.int16)
+    raw_bytes = quiet_samples.tobytes()
+
+    boosted_bytes = boost_and_normalize_audio(raw_bytes, target_peak=24000.0, max_gain=8.0)
+    boosted_samples = np.frombuffer(boosted_bytes, dtype=np.int16)
+
+    # Peak should now be significantly amplified (close to target peak)
+    assert np.max(np.abs(boosted_samples)) > 15000
+    # No clipping overflow above int16 bounds
+    assert np.max(boosted_samples) <= 32767
+    assert np.min(boosted_samples) >= -32767
+
+
+def test_boost_and_normalize_audio_silence():
+    """Verifies that pure room silence is not amplified excessively."""
+    import numpy as np
+    from transcriber import boost_and_normalize_audio
+
+    # Silence noise floor around 10
+    silence = np.random.randint(-10, 10, size=1024, dtype=np.int16)
+    silence_bytes = silence.tobytes()
+
+    result_bytes = boost_and_normalize_audio(silence_bytes)
+    result_samples = np.frombuffer(result_bytes, dtype=np.int16)
+
+    # Should remain near zero
+    assert np.max(np.abs(result_samples)) < 100
+
+
