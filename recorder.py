@@ -15,15 +15,32 @@ import wave
 import pyaudio
 
 
+class CallableBool(int):
+    """Boolean that can also be called as a zero-argument function."""
+
+    def __new__(cls, val):
+        return super().__new__(cls, 1 if val else 0)
+
+    def __call__(self) -> bool:
+        return bool(self)
+
+    def __repr__(self) -> str:
+        return "True" if self else "False"
+
+    def __str__(self) -> str:
+        return "True" if self else "False"
+
+
 class AudioRecorder:
     """Manages audio recording from the default microphone, saving uninterrupted audio
 
-    to a WAV file and concurrently streaming audio segments into a Queue.
+    to a WAV file (lectures/audio/lecture_<timestamp>.wav) and concurrently streaming
+    audio segments into a Queue.
     """
 
     def __init__(
         self,
-        output_dir: str | Path = "lectures",
+        output_dir: str | Path = "lectures/audio",
         sample_rate: int = 16000,
         channels: int = 1,
         chunk_size: int = 1024,
@@ -47,8 +64,9 @@ class AudioRecorder:
         self.current_wav_path: Optional[Path] = None
 
     @property
-    def is_recording(self) -> bool:
-        return self._is_recording
+    def is_recording(self) -> CallableBool:
+        """Returns recording status, usable both as property or method: is_recording or is_recording()."""
+        return CallableBool(self._is_recording)
 
     def start(self) -> Path:
         """Starts recording audio in a background thread."""

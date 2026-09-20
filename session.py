@@ -29,18 +29,29 @@ class LiveSession:
     def __init__(
         self,
         output_dir: str | Path = "lectures",
+        speaker: str = "Professor",
         sample_rate: int = 16000,
         language: str = "en-US",
         calibration_duration: float = 1.5,
+        audio_dir: Optional[str | Path] = None,
+        notes_dir: Optional[str | Path] = None,
+        auto_summarize: bool = True,
     ):
-        self.output_dir = Path(output_dir)
+        self.base_dir = Path(output_dir)
+        self.speaker = speaker
         self.sample_rate = sample_rate
         self.language = language
         self.calibration_duration = calibration_duration
+        self.auto_summarize = auto_summarize
+
+        # Route audio and notes to their respective subdirectories
+        self.audio_dir = Path(audio_dir) if audio_dir is not None else self.base_dir / "audio"
+        self.notes_dir = Path(notes_dir) if notes_dir is not None else self.base_dir / "notes"
+        self.study_notes_dir = self.base_dir / "study_notes"
 
         self.audio_queue: queue.Queue = queue.Queue()
         self.recorder = AudioRecorder(
-            output_dir=self.output_dir,
+            output_dir=self.audio_dir,
             sample_rate=self.sample_rate,
             audio_queue=self.audio_queue,
         )
@@ -49,11 +60,12 @@ class LiveSession:
             sample_rate=self.sample_rate,
             language=self.language,
             calibration_duration=self.calibration_duration,
-            on_text=self._handle_sentence,
+            on_phrase=self._handle_sentence,
         )
 
         self.wav_path: Optional[Path] = None
         self.md_path: Optional[Path] = None
+        self.study_notes_path: Optional[Path] = None
         self._md_file: Optional[TextIO] = None
 
         self._lock = threading.Lock()
@@ -66,24 +78,41 @@ class LiveSession:
     def is_running(self) -> bool:
         return self._is_running
 
-    def _handle_sentence(self, sentence: str) -> None:
+    def _get_current_offset(self) -> str:
+        """Returns elapsed session time formatted as HH:MM:SS."""
+        offset_sec = max(0.0, time.time() - (self._start_time or time.time()))
+        hours = int(offset_sec // 3600)
+        minutes = int((offset_sec % 3600) // 60)
+        seconds = int(offset_sec % 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _handle_sentence(
+        self, timestamp_offset_or_phrase, sentence: Optional[str] = None
+    ) -> None:
         """Callback invoked immediately when a sentence is transcribed."""
+        if sentence is None and isinstance(timestamp_offset_or_phrase, (tuple, list)):
+            timestamp_offset, sentence = timestamp_offset_or_phrase[0], timestamp_offset_or_phrase[1]
+        elif sentence is None:
+            timestamp_offset = self._get_current_offset()
+            sentence = str(timestamp_offset_or_phrase)
+        else:
+            timestamp_offset = str(timestamp_offset_or_phrase)
+
         sentence = sentence.strip()
         if not sentence:
             return
 
-        now = datetime.now()
-        timestamp_str = now.strftime("%H:%M:%S")
+        speaker_prefix = f"{self.speaker}: " if self.speaker else ""
 
         with self._lock:
             self.sentence_count += 1
 
-            # 1. Print live timestamp and spoken sentence to console
-            print(f"[{timestamp_str}] {sentence}", flush=True)
+            # 1. Print live timestamp and spoken sentence to console: e.g. [00:05:14] Professor: ...
+            print(f"[{timestamp_offset}] {speaker_prefix}{sentence}", flush=True)
 
             # 2. Continuously flush each sentence to disk so notes are preserved
             if self._md_file and not self._md_file.closed:
-                self._md_file.write(f"- **[{timestamp_str}]** {sentence}\n")
+                self._md_file.write(f"- **[{timestamp_offset}]** {speaker_prefix}{sentence}\n")
                 self._md_file.flush()
                 try:
                     os.fsync(self._md_file.fileno())
@@ -98,24 +127,27 @@ class LiveSession:
         if self._is_running:
             raise RuntimeError("LiveSession is already running.")
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
+        self.notes_dir.mkdir(parents=True, exist_ok=True)
+
         self._start_datetime = datetime.now()
         self._start_time = time.time()
         self.sentence_count = 0
 
-        # Start audio recording
+        # Start audio recording -> lectures/audio/lecture_<timestamp>.wav
         self.wav_path = self.recorder.start()
 
-        # Match markdown note file to the recording's timestamped name
-        self.md_path = self.wav_path.with_suffix(".md")
+        # Save markdown notes -> lectures/notes/lecture_<timestamp>.md
+        self.md_path = self.notes_dir / f"{self.wav_path.stem}.md"
 
         # Initialize markdown file with session metadata header
         self._md_file = open(self.md_path, "w", encoding="utf-8")
         header_text = (
             f"# Lecture Notes - {self._start_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"- **Audio Recording:** `{self.wav_path.name}`\n"
+            f"- **Audio Recording:** `{self.wav_path.as_posix()}`\n"
             f"- **Date:** {self._start_datetime.strftime('%A, %B %d, %Y')}\n"
             f"- **Session Started:** {self._start_datetime.strftime('%H:%M:%S')}\n"
+            f"- **Speaker:** {self.speaker}\n"
             f"- **Language:** {self.language}\n\n"
             f"---\n\n"
             f"## Live Transcript\n\n"
@@ -132,8 +164,8 @@ class LiveSession:
         # Calibrate for ambient lecture hall noise
         self.transcriber.calibrate(duration=self.calibration_duration)
 
-        # Start background transcription threads
-        self.transcriber.start()
+        # Start background transcription threads with session start time
+        self.transcriber.start(session_start_time=self._start_time)
 
         return self.wav_path, self.md_path
 
@@ -173,6 +205,15 @@ class LiveSession:
                     pass
                 self._md_file.close()
 
+        # Generate post-lecture study notes (summarizer.py)
+        if self.auto_summarize and self.md_path and self.md_path.exists():
+            try:
+                from summarizer import StudyNoteGenerator
+                generator = StudyNoteGenerator(output_dir=self.study_notes_dir)
+                self.study_notes_path = generator.generate_from_file(self.md_path)
+            except Exception as e:
+                print(f"\n[Warning] Could not auto-generate study notes: {e}")
+
         return final_wav, self.md_path
 
     def __enter__(self):
@@ -195,6 +236,13 @@ def main():
         help="Directory to save WAV audio and Markdown lecture notes (default: lectures)",
     )
     parser.add_argument(
+        "--speaker",
+        "-s",
+        type=str,
+        default="Professor",
+        help="Speaker name prefix for terminal and notes (default: Professor)",
+    )
+    parser.add_argument(
         "--language",
         "-l",
         type=str,
@@ -208,13 +256,20 @@ def main():
         default=1.5,
         help="Ambient noise calibration duration in seconds (default: 1.5)",
     )
+    parser.add_argument(
+        "--no-study-notes",
+        action="store_true",
+        help="Disable automatic post-lecture study note generation",
+    )
 
     args = parser.parse_args()
 
     session = LiveSession(
         output_dir=args.output_dir,
+        speaker=args.speaker,
         language=args.language,
         calibration_duration=args.calibrate_sec,
+        auto_summarize=not args.no_study_notes,
     )
 
     print("=" * 64)
@@ -255,6 +310,8 @@ def main():
         print("=" * 64)
         print(f"• Audio Saved:        {saved_wav}")
         print(f"• Markdown Notes:     {saved_md}")
+        if session.study_notes_path:
+            print(f"• Study Notes:        {session.study_notes_path}")
         print(f"• Sentences Captured: {session.sentence_count}")
         print(f"• Session Duration:   {duration_str}")
         print("=" * 64)

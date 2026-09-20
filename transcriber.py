@@ -7,6 +7,7 @@ and transient impulse rejection.
 """
 
 from collections import deque
+import inspect
 import logging
 from pathlib import Path
 import queue
@@ -24,6 +25,24 @@ except ImportError:
     AudioRecorder = None
 
 logger = logging.getLogger(__name__)
+
+
+class Phrase(tuple):
+    """Tuple of (timestamp_offset, text) with attribute access and string representation."""
+
+    def __new__(cls, timestamp_offset: str, text: str):
+        return super().__new__(cls, (timestamp_offset, text))
+
+    @property
+    def timestamp_offset(self) -> str:
+        return self[0]
+
+    @property
+    def text(self) -> str:
+        return self[1]
+
+    def __str__(self) -> str:
+        return self[1]
 
 
 def compute_rms(audio_chunk: bytes) -> float:
@@ -56,7 +75,9 @@ class LiveTranscriber:
         pause_threshold: float = 0.85,
         max_phrase_duration: float = 12.0,
         language: str = "en-US",
-        on_text: Optional[Callable[[str], None]] = None,
+        on_text: Optional[Callable] = None,
+        on_phrase: Optional[Callable[[str, str], None]] = None,
+        session_start_time: Optional[float] = None,
     ):
         """Args:
 
@@ -72,7 +93,9 @@ class LiveTranscriber:
         pause_threshold: Seconds of silence marking the end of a spoken phrase.
         max_phrase_duration: Maximum utterance length in seconds before segmenting.
         language: BCP-47 language tag for transcription (default: 'en-US').
-        on_text: Optional callback invoked with each transcribed sentence/phrase.
+        on_text: Optional callback invoked with transcribed phrase/text.
+        on_phrase: Optional callback invoked with (timestamp_offset, text).
+        session_start_time: Optional session start epoch time (time.time()) for computing offsets.
         """
         self.audio_queue = audio_queue
         self.sample_rate = sample_rate
@@ -87,9 +110,13 @@ class LiveTranscriber:
         self.max_phrase_duration = max_phrase_duration
         self.language = language
         self.on_text = on_text
+        self.on_phrase = on_phrase
+        self.session_start_time = session_start_time
 
-        # Queue for transcribed strings
-        self.text_queue: queue.Queue[str] = queue.Queue()
+        # Queue for transcribed strings or Phrase tuples
+        self.text_queue: queue.Queue[Phrase | str] = queue.Queue()
+        # Queue specifically for (timestamp_offset, text) phrase tuples
+        self.phrase_queue: queue.Queue[Phrase] = queue.Queue()
 
         # Speech recognition engine
         self.recognizer = sr.Recognizer()
@@ -104,8 +131,8 @@ class LiveTranscriber:
         pre_roll_chunks = max(1, int(0.3 / self.chunk_duration))
         self._pre_roll = deque(maxlen=pre_roll_chunks)
 
-        # Internal queues and threading
-        self._phrase_queue: queue.Queue[bytes] = queue.Queue()
+        # Internal queues and threading: items are (phrase_start_time, audio_bytes)
+        self._phrase_queue: queue.Queue[tuple[float, bytes]] = queue.Queue()
         self._stop_event = threading.Event()
         self._process_thread: Optional[threading.Thread] = None
         self._transcribe_thread: Optional[threading.Thread] = None
@@ -146,10 +173,15 @@ class LiveTranscriber:
         )
         return self.ambient_energy
 
-    def start(self) -> None:
+    def start(self, session_start_time: Optional[float] = None) -> None:
         """Starts the audio processor and transcriber background threads."""
         if self._is_running:
             return
+
+        if session_start_time is not None:
+            self.session_start_time = session_start_time
+        elif self.session_start_time is None:
+            self.session_start_time = time.time()
 
         self._stop_event.clear()
         self._is_running = True
@@ -180,6 +212,7 @@ class LiveTranscriber:
             self.calibrate()
 
         in_speech = False
+        phrase_start_time = time.time()
         speech_chunks: list[bytes] = []
         silence_chunks_count = 0
         voiced_chunks_count = 0
@@ -203,6 +236,7 @@ class LiveTranscriber:
                 if energy >= self.speech_threshold:
                     # Potential speech onset
                     in_speech = True
+                    phrase_start_time = time.time()
                     voiced_chunks_count = 1
                     silence_chunks_count = 0
                     speech_chunks = list(self._pre_roll)
@@ -232,7 +266,7 @@ class LiveTranscriber:
                     # Filter out short isolated transients (e.g. keyboard typing clicks)
                     if voiced_chunks_count >= min_speech_chunk_limit:
                         full_audio_bytes = b"".join(speech_chunks)
-                        self._phrase_queue.put(full_audio_bytes)
+                        self._phrase_queue.put((phrase_start_time, full_audio_bytes))
 
                     # Reset state for next utterance
                     in_speech = False
@@ -243,15 +277,20 @@ class LiveTranscriber:
 
         # Flush any in-progress speech when shutting down
         if in_speech and voiced_chunks_count >= min_speech_chunk_limit:
-            self._phrase_queue.put(b"".join(speech_chunks))
+            self._phrase_queue.put((phrase_start_time, b"".join(speech_chunks)))
 
     def _transcription_worker(self) -> None:
         """Consumes buffered speech utterances and converts them to text."""
         while not self._stop_event.is_set() or not self._phrase_queue.empty():
             try:
-                audio_bytes = self._phrase_queue.get(timeout=0.3)
+                item = self._phrase_queue.get(timeout=0.3)
             except queue.Empty:
                 continue
+
+            if isinstance(item, tuple):
+                phrase_start_time, audio_bytes = item
+            else:
+                phrase_start_time, audio_bytes = time.time(), item
 
             try:
                 audio_data = sr.AudioData(
@@ -264,10 +303,48 @@ class LiveTranscriber:
                 )
                 text = text.strip()
                 if text:
-                    self.text_queue.put(text)
+                    # Calculate session timestamp offset
+                    base_time = (
+                        self.session_start_time
+                        if self.session_start_time is not None
+                        else phrase_start_time
+                    )
+                    offset_sec = max(0.0, phrase_start_time - base_time)
+                    hours = int(offset_sec // 3600)
+                    minutes = int((offset_sec % 3600) // 60)
+                    seconds = int(offset_sec % 60)
+                    timestamp_offset = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+                    phrase = Phrase(timestamp_offset, text)
+                    self.phrase_queue.put(phrase)
+                    self.text_queue.put(phrase)
+
+                    if self.on_phrase:
+                        try:
+                            self.on_phrase(timestamp_offset, text)
+                        except TypeError:
+                            self.on_phrase(phrase)
+                        except Exception as e:
+                            logger.error(f"Error in on_phrase callback: {e}")
+
                     if self.on_text:
                         try:
-                            self.on_text(text)
+                            sig = inspect.signature(self.on_text)
+                            params = [
+                                p
+                                for p in sig.parameters.values()
+                                if p.default == p.empty
+                                and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                            ]
+                            if len(params) == 2:
+                                self.on_text(timestamp_offset, text)
+                            else:
+                                self.on_text(phrase)
+                        except TypeError:
+                            try:
+                                self.on_text(text)
+                            except Exception as e:
+                                logger.error(f"Error in on_text callback: {e}")
                         except Exception as e:
                             logger.error(f"Error in on_text callback: {e}")
             except sr.UnknownValueError:
@@ -278,10 +355,22 @@ class LiveTranscriber:
             except Exception as e:
                 logger.warning(f"Transcription error: {e}")
 
+    def get_phrase(
+        self, block: bool = True, timeout: Optional[float] = None
+    ) -> Optional[tuple[str, str]]:
+        """Retrieves the next recognized (timestamp_offset, text) phrase tuple from the queue."""
+        try:
+            return self.phrase_queue.get(block=block, timeout=timeout)
+        except queue.Empty:
+            return None
+
     def get_text(self, block: bool = True, timeout: Optional[float] = None) -> Optional[str]:
         """Retrieves the next transcribed text string from the queue."""
         try:
-            return self.text_queue.get(block=block, timeout=timeout)
+            item = self.text_queue.get(block=block, timeout=timeout)
+            if isinstance(item, tuple):
+                return item[1]
+            return item
         except queue.Empty:
             return None
 
@@ -321,13 +410,12 @@ def main():
 
     recorder = AudioRecorder(audio_queue=audio_queue)
 
-    def print_transcript(text: str) -> None:
-        timestamp = time.strftime("%H:%M:%S")
-        print(f"[{timestamp}] {text}")
+    def print_transcript(timestamp_offset: str, text: str) -> None:
+        print(f"[{timestamp_offset}] {text}")
 
     transcriber = LiveTranscriber(
         audio_queue=audio_queue,
-        on_text=print_transcript,
+        on_phrase=print_transcript,
     )
 
     print("\n1. Starting microphone recording...")
