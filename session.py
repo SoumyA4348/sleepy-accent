@@ -30,7 +30,7 @@ class LiveSession:
         self,
         output_dir: str | Path = "lectures",
         title: Optional[str] = None,
-        speaker: str = "Professor",
+        speaker: str = "Speaker",
         sample_rate: int = 16000,
         language: str = "en-US",
         calibration_duration: float = 1.5,

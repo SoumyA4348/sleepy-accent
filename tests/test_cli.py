@@ -162,7 +162,7 @@ def test_run_cli_full_cycle(tmp_path, monkeypatch, capsys):
 
         captured = capsys.readouterr().out
         assert "CIS2520 - Data Structures" in captured
-        assert "LECTURE STUDY RECAP COMPLETE" in captured
+        assert "LIVE SPEECH & SESSION RECAP COMPLETE" in captured
 
 
 def test_boost_and_normalize_audio():

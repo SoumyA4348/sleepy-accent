@@ -1,22 +1,23 @@
-# sleepy-accent 🎙️😴
+# sleepy-accent 🎙️⚡
 
-> *"you can sleep peacefully in your lectures now"*
+> *"Real-time speech capture & intelligence for public speeches, conference keynotes, and high-stakes sessions."*
 
 > [!WARNING]
-> **Academic Policy & Recording Consent Notice**:
-> This tool is intended strictly for personal study, review, and accessibility note-taking. Before recording audio in lectures, ensure compliance with your university's academic regulations, student code of conduct, and regional privacy laws. Always obtain explicit permission or consent from your course instructor prior to recording in-class sessions.
+> **Recording Consent & Session Privacy Notice**:
+> This tool is designed for authorized transcription, personal note-taking, and accessibility during public speeches, conferences, and open sessions. For private or Chatham House Rule sessions, always ensure compliance with event policies, local recording consent regulations, and speaker privacy guidelines prior to recording.
 
-A lightweight, terminal-native live lecture recorder and real-time speech transcriber. Captures audio directly from your laptop microphone, streams live transcriptions with timestamps to your console, auto-saves every sentence to disk in real-time, and generates structured post-lecture study recaps (definitions, formulas, and exam takeaways).
+A lightweight, terminal-native live speech recorder and real-time audio transcriber. Captures spoken audio directly from your laptop or external microphone, streams live transcriptions with timestamps to your console, auto-saves every phrase to disk in real-time, and synthesizes structured executive session recaps (core arguments, key announcements, metrics, and actionable takeaways).
 
 ---
 
 ## ⚡ Features
 
-* **Mic Audio Capture & Auto-Archiving:** Streams 16kHz PCM audio while continuously saving a backup `.wav` file (`lectures/audio/`).
-* **Accent & Rapid-Pacing Resilient:** Pre-calibrates ambient room noise (HVAC humming, typing, hall chatter) using dynamic energy thresholds.
-* **Continuous Real-Time Flush:** Writes incoming sentences directly to markdown (`lectures/notes/`) as they are spoken—no notes are lost if your battery dies.
-* **Post-Lecture Synthesis:** Synthesizes clean study recaps with concept extraction, formula detection, and exam takeaways via Gemini, OpenAI, Ollama, or local heuristic fallback.
-* **Zero Bloat & Battery Friendly:** Pure Python background threading without heavy GPU dependencies.
+* **Live Stage Audio Capture & Auto-Archiving:** Streams 16kHz PCM audio while continuously saving an uncompressed backup `.wav` file (`sessions/audio/`).
+* **Global Accent & Fast-Cadence Resilient:** Purpose-built to decipher rapid delivery and diverse international accents across global conferences and technical keynotes.
+* **Auditorium Distance & Voice Booster:** Built-in dynamic Automatic Gain Control (AGC) and DC-offset filtering that amplifies distant stage or podium voices (up to 8.0x / +18 dB) without clipping.
+* **Continuous Real-Time Flush:** Writes incoming phrases directly to markdown (`sessions/notes/`) as they are spoken—zero data loss if your laptop sleeps or battery dies.
+* **Executive Recap Synthesis:** Automatically parses raw transcripts into polished briefings, extracting key announcements, strategic insights, definitions, and action points via Gemini, OpenAI, Ollama, or local heuristic fallback.
+* **Zero Bloat & Battery Friendly:** Pure Python background threading without heavy GPU dependencies—keeps your laptop cold and silent in quiet auditoriums.
 
 ---
 
@@ -25,14 +26,14 @@ A lightweight, terminal-native live lecture recorder and real-time speech transc
 ```
 sleepy-accent/
 ├── recorder.py       # Background mic capture & parallel audio file writer
-├── transcriber.py    # Speech-to-text worker with noise calibration & accent handling
+├── transcriber.py    # Speech-to-text worker with noise calibration, AGC & accent handling
 ├── session.py        # Live session coordinator & real-time markdown logger
-├── summarizer.py     # Post-lecture cleaner & study note synthesizer
+├── summarizer.py     # Post-speech cleaner & executive briefing synthesizer
 ├── main.py           # Single interactive CLI entrypoint
 ├── tests/            # Automated test suite (pytest)
-└── lectures/
-    ├── audio/        # Raw .wav audio recordings
-    └── notes/        # Live transcript logs & generated study recaps
+└── sessions/
+    ├── audio/        # Raw .wav audio recordings (full backup)
+    └── notes/        # Live transcript logs & generated executive recaps
 ```
 
 ---
@@ -51,21 +52,21 @@ pip install pyaudio SpeechRecognition
 pip install colorama
 ```
 
-### 2. Run in Class
+### 2. Run at an Event
 
 ```bash
 python main.py
 ```
 
-1. Enter your lecture name (e.g. `CIS2520 - Data Structures`) or press **Enter** for default timestamp.
-2. Press **Enter** to calibrate room noise and start listening.
-3. Transcriptions will stream live onto your terminal with timestamps:
+1. Enter your event/session name (e.g. `Tech Summit 2026 - AI Keynote`) or press **Enter** for a default timestamped title.
+2. Press **Enter** to calibrate auditorium ambient noise and begin live capture.
+3. Transcriptions stream live onto your terminal with session timestamps:
    ```
-   [00:04:12] Professor: Today we are discussing balanced AVL trees and rotation operations.
-   [00:04:35] Professor: Notice that the height difference between subtrees can never exceed one.
+   [00:04:12] Speaker: Today we are announcing our next-generation distributed inference engine.
+   [00:04:35] Speaker: The primary benchmark demonstrates a 3.4x reduction in per-token latency.
    ```
-4. Press **`q`** or **`Ctrl+C`** when class ends.
-5. `sleepy-accent` will instantly finalize your raw transcript and generate a structured study recap.
+4. Press **`q`** or **`Ctrl+C`** when the session concludes.
+5. `sleepy-accent` instantly finalizes your transcript and generates an executive session summary.
 
 ---
 
@@ -77,13 +78,15 @@ python main.py --help
 
 | Flag | Description | Default |
 |---|---|---|
-| `-c, --course` | Course or lecture title | Interactive prompt |
-| `-s, --speaker` | Speaker prefix in live log | `Professor` |
-| `-o, --output-dir` | Directory for audio and notes | `lectures` |
+| `-c, --session` | Session or event title (e.g. `'AI Summit Keynote'`) | Interactive prompt |
+| `-s, --speaker` | Speaker prefix label in live log | `Speaker` |
+| `-o, --output-dir` | Directory for audio recordings and notes | `sessions` |
 | `-l, --language` | Speech recognition language code | `en-US` |
-| `--calibrate-sec`| Duration (seconds) for ambient noise calibration | `1.5` |
+| `--calibrate-sec`| Duration (seconds) for ambient hall noise calibration | `1.5` |
+| `--max-gain` | Maximum AGC gain multiplier for distant podium audio | `8.0` |
+| `--no-boost` | Disable automatic gain boost for close/front-row audio | `False` |
 | `-p, --provider` | Recap LLM provider (`auto`, `gemini`, `openai`, `ollama`, `heuristic`) | `auto` |
-| `--no-recap` | Skip generating study summary at the end | `False` |
+| `--no-recap` | Skip generating executive recap at conclusion | `False` |
 | `-y, --yes` | Skip confirmation and start listening immediately | `False` |
 
 ---

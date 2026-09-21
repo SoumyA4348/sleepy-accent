@@ -38,22 +38,22 @@ from session import LiveSession
 def print_banner() -> None:
     """Renders the top application banner."""
     print(Fore.CYAN + Style.BRIGHT + "=" * 68)
-    print(Fore.CYAN + Style.BRIGHT + "            SLEEPY ACCENT - Live Lecture Assistant & Recap          ")
+    print(Fore.CYAN + Style.BRIGHT + "       SLEEPY ACCENT - Live Speech, Keynote & Session Capture       ")
     print(Fore.CYAN + Style.BRIGHT + "=" * 68)
-    print(Style.DIM + " Real-time accent-resilient transcription, auto-save & study summaries")
+    print(Style.DIM + " Real-time accent-resilient speech transcription, AGC & executive recap")
     print(Fore.CYAN + "-" * 68)
 
 
-def prompt_course_name(default_title: Optional[str] = None) -> str:
-    """Prompts the user for lecture/course title with an optional default."""
+def prompt_session_title(default_title: Optional[str] = None) -> str:
+    """Prompts the user for session / speech / event title with an optional default."""
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    fallback = default_title or f"Lecture - {now_str}"
+    fallback = default_title or f"Session - {now_str}"
 
-    print(Fore.YELLOW + Style.BRIGHT + "\n[Step 1/2] Lecture Identification")
+    print(Fore.YELLOW + Style.BRIGHT + "\n[Step 1/2] Session Identification")
     try:
         user_input = input(
-            Fore.WHITE + "Enter lecture name/course (e.g., "
-            + Fore.CYAN + "CIS2520 - Data Structures"
+            Fore.WHITE + "Enter session / event title (e.g., "
+            + Fore.CYAN + "Tech Summit 2026 Keynote"
             + Fore.WHITE + ") [Press Enter for default]:\n> "
         ).strip()
     except (EOFError, KeyboardInterrupt):
@@ -64,9 +64,13 @@ def prompt_course_name(default_title: Optional[str] = None) -> str:
         user_input = fallback
         print(Style.DIM + f"Using title: {user_input}")
     else:
-        print(Fore.GREEN + f"Recorded course title: {user_input}")
+        print(Fore.GREEN + f"Recorded session title: {user_input}")
 
     return user_input
+
+
+# Backward compatibility alias
+prompt_course_name = prompt_session_title
 
 
 def wait_for_start(auto_start: bool = False) -> None:
@@ -124,9 +128,9 @@ def display_recap_summary(
 ) -> None:
     """Displays structured summary card upon session completion."""
     print("\n" + Fore.CYAN + Style.BRIGHT + "=" * 68)
-    print(Fore.CYAN + Style.BRIGHT + "                    LECTURE STUDY RECAP COMPLETE                    ")
+    print(Fore.CYAN + Style.BRIGHT + "            LIVE SPEECH & SESSION RECAP COMPLETE            ")
     print(Fore.CYAN + Style.BRIGHT + "=" * 68)
-    print(Fore.WHITE + Style.BRIGHT + f"  Course / Topic:       " + Fore.YELLOW + f"{course_title}")
+    print(Fore.WHITE + Style.BRIGHT + f"  Session / Topic:      " + Fore.YELLOW + f"{course_title}")
     print(Fore.WHITE + Style.BRIGHT + f"  Session Duration:     " + Fore.WHITE + f"{duration_str}")
     print(Fore.WHITE + Style.BRIGHT + f"  Sentences Captured:   " + Fore.GREEN + f"{session.sentence_count}")
 
@@ -136,10 +140,10 @@ def display_recap_summary(
     if transcript_path:
         print(Fore.WHITE + f"  • Raw Transcript:     " + Style.DIM + f"{transcript_path}")
     if recap_path and recap_path.exists():
-        print(Fore.GREEN + Style.BRIGHT + f"  • Final Study Recap:  " + Fore.GREEN + f"{recap_path}")
-        print(Fore.WHITE + f"    (Contains phonetic corrections, definitions, formulas & exam tips)")
+        print(Fore.GREEN + Style.BRIGHT + f"  • Final Recap:        " + Fore.GREEN + f"{recap_path}")
+        print(Fore.WHITE + f"    (Contains phonetic corrections, core arguments, metrics & takeaways)")
     else:
-        print(Fore.YELLOW + f"  • Final Study Recap:  [Not generated or disabled]")
+        print(Fore.YELLOW + f"  • Final Recap:        [Not generated or disabled]")
 
     print(Fore.CYAN + Style.BRIGHT + "=" * 68 + "\n")
 
@@ -147,28 +151,30 @@ def display_recap_summary(
 def run_cli():
     """Main CLI execution flow."""
     parser = argparse.ArgumentParser(
-        description="Sleepy Accent CLI: Live lecture listening and automated study recap generation."
+        description="Sleepy Accent CLI: Real-time speech transcription, AGC boost, and executive recap generation for public speeches and high-stakes sessions."
     )
     parser.add_argument(
+        "--session",
         "--course",
         "-c",
         type=str,
         default=None,
-        help="Lecture name or course title (e.g. 'CIS2520 - Data Structures')",
+        dest="session",
+        help="Session, speech, or event title (e.g. 'Tech Summit 2026 Keynote')",
     )
     parser.add_argument(
         "--speaker",
         "-s",
         type=str,
-        default="Professor",
-        help="Speaker label prefix for transcription (default: Professor)",
+        default="Speaker",
+        help="Speaker label prefix for transcription (default: Speaker)",
     )
     parser.add_argument(
         "--output-dir",
         "-o",
         type=str,
-        default="lectures",
-        help="Root directory for saving audio, notes, and study recaps (default: lectures)",
+        default="sessions",
+        help="Root directory for saving audio, notes, and session recaps (default: sessions)",
     )
     parser.add_argument(
         "--language",
@@ -218,8 +224,8 @@ def run_cli():
     # Clear terminal screen cleanly if in interactive tty (optional)
     print_banner()
 
-    # 1. Prompt for lecture name / course if not specified in args
-    course_name = args.course if args.course else prompt_course_name()
+    # 1. Prompt for session / speech title if not specified in args
+    session_title = args.session if args.session else prompt_session_title()
 
     # 2. Wait for user to hit Enter before starting audio listening
     wait_for_start(auto_start=args.yes)
@@ -228,7 +234,7 @@ def run_cli():
     print(Fore.CYAN + "\n[*] Initializing microphone and continuous auto-saver...")
     session = LiveSession(
         output_dir=args.output_dir,
-        title=course_name,
+        title=session_title,
         speaker=args.speaker,
         language=args.language,
         calibration_duration=args.calibrate_sec,
@@ -281,7 +287,7 @@ def run_cli():
     # 6. Display complete summary card
     display_recap_summary(
         session=session,
-        course_title=course_name,
+        course_title=session_title,
         duration_str=duration_str,
         audio_path=saved_wav,
         transcript_path=saved_md,
