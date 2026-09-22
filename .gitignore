@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
-lectures/*.wav
+
+# Audio recordings (prevent lecture audio from being uploaded to git)
+*.wav
+**/*.wav
+
+# Session data, lecture audio, transcripts, and notes (keep private locally)
+sessions/
+lectures/

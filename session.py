@@ -43,6 +43,7 @@ class LiveSession:
         summarizer_model: Optional[str] = None,
         boost_distant: bool = True,
         max_gain: float = 8.0,
+        input_device_index: Optional[int] = None,
     ):
         self.base_dir = Path(output_dir)
         self.title = title.strip() if title and title.strip() else None
@@ -56,6 +57,7 @@ class LiveSession:
         self.summarizer_model = summarizer_model
         self.boost_distant = boost_distant
         self.max_gain = max_gain
+        self.input_device_index = input_device_index
 
         # Route audio and notes to their respective subdirectories
         self.audio_dir = Path(audio_dir) if audio_dir is not None else self.base_dir / "audio"
@@ -69,6 +71,7 @@ class LiveSession:
             output_dir=self.audio_dir,
             sample_rate=self.sample_rate,
             audio_queue=self.audio_queue,
+            input_device_index=self.input_device_index,
         )
         self.transcriber = LiveTranscriber(
             audio_queue=self.audio_queue,

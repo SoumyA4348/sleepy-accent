@@ -31,6 +31,25 @@ class CallableBool(int):
         return "True" if self else "False"
 
 
+def ensure_microphone_unmuted() -> bool:
+    """Verifies that the Windows master microphone is not muted, automatically unmuting if needed."""
+    try:
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+        import comtypes
+        import ctypes
+        dev = AudioUtilities.GetMicrophone()
+        if dev:
+            interface = dev.Activate(IAudioEndpointVolume._iid_, comtypes.CLSCTX_ALL, None)
+            volume = ctypes.cast(interface, ctypes.POINTER(IAudioEndpointVolume))
+            if volume.GetMute():
+                volume.SetMute(0, None)
+                print("\n[AudioRecorder] Notice: Microphone was muted in Windows settings. Unmuted automatically.")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 class AudioRecorder:
     """Manages audio recording from the default microphone, saving uninterrupted audio
 
@@ -45,12 +64,14 @@ class AudioRecorder:
         channels: int = 1,
         chunk_size: int = 1024,
         audio_queue: Optional[queue.Queue] = None,
+        input_device_index: Optional[int] = None,
     ):
         self.output_dir = Path(output_dir)
         self.sample_rate = sample_rate
         self.channels = channels
         self.chunk_size = chunk_size
         self.audio_format = pyaudio.paInt16
+        self.input_device_index = input_device_index
 
         # In-memory queue for streaming segments to downstream consumers
         self.audio_queue = audio_queue if audio_queue is not None else queue.Queue()
@@ -62,6 +83,7 @@ class AudioRecorder:
         self._stop_event = threading.Event()
         self._is_recording = False
         self.current_wav_path: Optional[Path] = None
+        self.selected_device_name: Optional[str] = None
 
     @property
     def is_recording(self) -> CallableBool:
@@ -72,6 +94,9 @@ class AudioRecorder:
         """Starts recording audio in a background thread."""
         if self._is_recording:
             raise RuntimeError("AudioRecorder is already recording.")
+
+        # Ensure Windows microphone endpoint is unmuted
+        ensure_microphone_unmuted()
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -85,14 +110,28 @@ class AudioRecorder:
         # Initialize PyAudio
         self._pyaudio = pyaudio.PyAudio()
 
+        stream_kwargs = {
+            "format": self.audio_format,
+            "channels": self.channels,
+            "rate": self.sample_rate,
+            "input": True,
+            "frames_per_buffer": self.chunk_size,
+        }
+        if self.input_device_index is not None:
+            stream_kwargs["input_device_index"] = self.input_device_index
+            try:
+                self.selected_device_name = self._pyaudio.get_device_info_by_index(self.input_device_index).get("name", "")
+            except Exception:
+                self.selected_device_name = f"Device #{self.input_device_index}"
+        else:
+            try:
+                default_dev = self._pyaudio.get_default_input_device_info()
+                self.selected_device_name = default_dev.get("name", "Default Microphone")
+            except Exception:
+                self.selected_device_name = "Default Microphone"
+
         # Open microphone input stream
-        self._stream = self._pyaudio.open(
-            format=self.audio_format,
-            channels=self.channels,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=self.chunk_size,
-        )
+        self._stream = self._pyaudio.open(**stream_kwargs)
 
         # Open output WAV file
         self._wav_file = wave.open(str(self.current_wav_path), "wb")
