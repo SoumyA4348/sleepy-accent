@@ -213,6 +213,29 @@ def run_cli():
         help="Maximum gain boost multiplier for distant voices (default: 8.0x)",
     )
     parser.add_argument(
+        "--engine",
+        choices=["auto", "whisper", "google"],
+        default="auto",
+        help="Speech recognition engine: 'whisper' (local faster-whisper), 'google' (Google Speech API), or 'auto' (default: auto)",
+    )
+    parser.add_argument(
+        "--whisper-model",
+        type=str,
+        default="base.en",
+        help="Model size for faster-whisper (tiny.en, base.en, small.en, medium.en; default: base.en)",
+    )
+    parser.add_argument(
+        "--refine",
+        action="store_true",
+        help="Perform a post-session full audio refinement pass with Whisper on the saved WAV file before generating the recap",
+    )
+    parser.add_argument(
+        "--transcribe-file",
+        type=str,
+        default=None,
+        help="Transcribe an existing audio file (.wav, .mp3, etc.) directly without recording",
+    )
+    parser.add_argument(
         "--yes",
         "-y",
         action="store_true",
@@ -223,6 +246,85 @@ def run_cli():
 
     # Clear terminal screen cleanly if in interactive tty (optional)
     print_banner()
+
+    # Handler for transcribing pre-recorded audio files directly
+    if args.transcribe_file:
+        from transcriber import transcribe_file
+        from summarizer import StudyNoteGenerator
+
+        audio_file = Path(args.transcribe_file)
+        if not audio_file.exists():
+            print(Fore.RED + f"Error: Audio file not found: {audio_file}")
+            sys.exit(1)
+
+        session_title = args.session if args.session else audio_file.stem
+        print(Fore.CYAN + f"\n[*] Transcribing existing audio recording: {audio_file.name}")
+        print(Style.DIM + f"    Model: {args.whisper_model} | Language: {args.language}")
+
+        out_base = Path(args.output_dir)
+        notes_dir = out_base / "notes"
+        study_notes_dir = out_base / "study_notes"
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        study_notes_dir.mkdir(parents=True, exist_ok=True)
+
+        md_path = notes_dir / f"{audio_file.stem}.md"
+
+        def print_phrase(ts, txt):
+            print(f"[{ts}] {args.speaker}: {txt}")
+
+        start_t = time.time()
+        phrases = transcribe_file(
+            audio_file,
+            model_size=args.whisper_model,
+            language=args.language,
+            on_phrase=print_phrase,
+        )
+        duration_sec = int(time.time() - start_t)
+        duration_str = time.strftime("%H:%M:%S", time.gmtime(duration_sec))
+
+        # Write markdown transcript
+        lines = [
+            f"# {session_title}\n",
+            f"- **Course / Topic:** {session_title}",
+            f"- **Audio Recording:** `{audio_file.as_posix()}`",
+            f"- **Date:** {datetime.now().strftime('%A, %B %d, %Y')}",
+            f"- **Speaker:** {args.speaker}",
+            f"- **Language:** {args.language}\n",
+            "---\n",
+            "## Live Transcript\n\n",
+        ]
+        for p in phrases:
+            lines.append(f"- **[{p.timestamp_offset}]** {args.speaker}: {p.text}")
+        lines.extend([
+            "\n---\n\n",
+            "## Session Summary\n\n",
+            f"- **Total Sentences Captured:** {len(phrases)}\n",
+        ])
+        md_path.write_text("\n".join(lines), encoding="utf-8")
+        print(Fore.GREEN + f"\n[+] Transcript saved to: {md_path}")
+
+        recap_path = None
+        if not args.no_recap and phrases:
+            print(Fore.CYAN + "[*] Synthesizing study recap notes...")
+            generator = StudyNoteGenerator(
+                output_dir=study_notes_dir,
+                provider=args.provider,
+            )
+            recap_path = generator.generate_from_file(md_path)
+
+        # Build mock session object for display card
+        class DummySession:
+            def __init__(self, count):
+                self.sentence_count = count
+        display_recap_summary(
+            session=DummySession(len(phrases)),
+            course_title=session_title,
+            duration_str=duration_str,
+            audio_path=audio_file,
+            transcript_path=md_path,
+            recap_path=recap_path,
+        )
+        return
 
     # 1. Prompt for session / speech title if not specified in args
     session_title = args.session if args.session else prompt_session_title()
@@ -242,6 +344,9 @@ def run_cli():
         summarizer_provider=args.provider,
         boost_distant=not args.no_boost,
         max_gain=args.max_gain,
+        transcriber_engine=args.engine,
+        whisper_model=args.whisper_model,
+        refine_from_audio=args.refine,
     )
 
     # Start audio capture & continuous transcript file

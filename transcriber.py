@@ -18,6 +18,11 @@ from typing import Callable, Optional
 import numpy as np
 import speech_recognition as sr
 
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    WhisperModel = None
+
 # Optional import of AudioRecorder for standalone / integration mode
 try:
     from recorder import AudioRecorder
@@ -25,6 +30,46 @@ except ImportError:
     AudioRecorder = None
 
 logger = logging.getLogger(__name__)
+
+# Cached model dictionary: (model_size, device) -> WhisperModel
+_whisper_model_cache: dict[tuple[str, str], Optional[WhisperModel]] = {}
+
+
+def get_whisper_model(model_size: str = "base.en", device: str = "auto") -> Optional[WhisperModel]:
+    """Loads and caches a faster-whisper model.
+
+    Tries CUDA if requested or auto, verifying execution before falling back to CPU (int8).
+    """
+    if WhisperModel is None:
+        return None
+
+    cache_key = (model_size, device)
+    if cache_key in _whisper_model_cache:
+        return _whisper_model_cache[cache_key]
+
+    model = None
+    if device in ("auto", "cuda"):
+        try:
+            m = WhisperModel(model_size, device="cuda", compute_type="float16")
+            # Quick verification that CUDA kernels and cublas DLLs execute without runtime failure
+            test_arr = np.zeros(1600, dtype=np.float32)
+            test_segs, _ = m.transcribe(test_arr)
+            list(test_segs)
+            model = m
+            logger.info(f"Initialized faster-whisper '{model_size}' on CUDA (float16).")
+        except Exception as e:
+            logger.info(f"CUDA faster-whisper unavailable ({e}); falling back to CPU (int8).")
+
+    if model is None:
+        try:
+            model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            logger.info(f"Initialized faster-whisper '{model_size}' on CPU (int8).")
+        except Exception as e:
+            logger.error(f"Failed to load faster-whisper '{model_size}' on CPU: {e}")
+            return None
+
+    _whisper_model_cache[cache_key] = model
+    return model
 
 
 class Phrase(tuple):
@@ -115,6 +160,9 @@ class LiveTranscriber:
         on_text: Optional[Callable] = None,
         on_phrase: Optional[Callable[[str, str], None]] = None,
         session_start_time: Optional[float] = None,
+        engine: str = "auto",
+        whisper_model: str = "base.en",
+        device: str = "auto",
     ):
         """Args:
 
@@ -135,6 +183,9 @@ class LiveTranscriber:
         on_text: Optional callback invoked with transcribed phrase/text.
         on_phrase: Optional callback invoked with (timestamp_offset, text).
         session_start_time: Optional session start epoch time (time.time()) for computing offsets.
+        engine: Transcription engine ('auto', 'whisper', or 'google').
+        whisper_model: Model size for faster-whisper (e.g. 'base.en', 'tiny.en', 'small.en').
+        device: Hardware device for faster-whisper ('auto', 'cuda', or 'cpu').
         """
         self.audio_queue = audio_queue
         self.sample_rate = sample_rate
@@ -154,6 +205,10 @@ class LiveTranscriber:
         self.on_text = on_text
         self.on_phrase = on_phrase
         self.session_start_time = session_start_time
+        self.engine = engine.lower()
+        self.whisper_model_name = whisper_model
+        self.device = device
+        self._whisper_model_instance = None
 
         # Queue for transcribed strings or Phrase tuples
         self.text_queue: queue.Queue[Phrase | str] = queue.Queue()
@@ -321,6 +376,15 @@ class LiveTranscriber:
         if in_speech and voiced_chunks_count >= min_speech_chunk_limit:
             self._phrase_queue.put((phrase_start_time, b"".join(speech_chunks)))
 
+    def _get_whisper_model(self) -> Optional[WhisperModel]:
+        """Lazily loads and caches the faster-whisper model."""
+        if self._whisper_model_instance is None and WhisperModel is not None:
+            self._whisper_model_instance = get_whisper_model(
+                model_size=self.whisper_model_name,
+                device=self.device,
+            )
+        return self._whisper_model_instance
+
     def _transcription_worker(self) -> None:
         """Consumes buffered speech utterances and converts them to text."""
         while not self._stop_event.is_set() or not self._phrase_queue.empty():
@@ -341,14 +405,46 @@ class LiveTranscriber:
                         audio_bytes, max_gain=self.max_gain
                     )
 
-                audio_data = sr.AudioData(
-                    audio_bytes,
-                    sample_rate=self.sample_rate,
-                    sample_width=self.sample_width,
-                )
-                text = self.recognizer.recognize_google(
-                    audio_data, language=self.language
-                )
+                text = ""
+
+                # 1. Faster-Whisper path (offline, robust to accents and noise)
+                if self.engine in ("whisper", "auto") and WhisperModel is not None:
+                    model = self._get_whisper_model()
+                    if model is not None:
+                        try:
+                            audio_np = (
+                                np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+                                / 32768.0
+                            )
+                            lang = (
+                                self.language.split("-")[0].lower() if self.language else "en"
+                            )
+                            segments, _ = model.transcribe(
+                                audio_np,
+                                language=lang,
+                                vad_filter=True,
+                                beam_size=3,
+                            )
+                            text = " ".join(s.text.strip() for s in segments).strip()
+                        except Exception as e:
+                            logger.warning(f"Whisper transcription error: {e}")
+
+                # 2. Google Speech Recognition fallback path
+                if not text and self.engine in ("google", "auto"):
+                    try:
+                        audio_data = sr.AudioData(
+                            audio_bytes,
+                            sample_rate=self.sample_rate,
+                            sample_width=self.sample_width,
+                        )
+                        text = self.recognizer.recognize_google(
+                            audio_data, language=self.language
+                        ).strip()
+                    except sr.UnknownValueError:
+                        pass
+                    except sr.RequestError as e:
+                        logger.warning(f"Speech recognition service request error: {e}")
+
                 text = text.strip()
                 if text:
                     # Calculate session timestamp offset
@@ -395,13 +491,8 @@ class LiveTranscriber:
                                 logger.error(f"Error in on_text callback: {e}")
                         except Exception as e:
                             logger.error(f"Error in on_text callback: {e}")
-            except sr.UnknownValueError:
-                # Audio had speech-like energy but no recognizable words (e.g. cough, chair slide)
-                pass
-            except sr.RequestError as e:
-                logger.warning(f"Speech recognition service request error: {e}")
             except Exception as e:
-                logger.warning(f"Transcription error: {e}")
+                logger.warning(f"Transcription worker error: {e}")
 
     def get_phrase(
         self, block: bool = True, timeout: Optional[float] = None
@@ -441,6 +532,68 @@ class LiveTranscriber:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+
+
+def transcribe_file(
+    audio_path: str | Path,
+    model_size: str = "base.en",
+    language: str = "en-US",
+    device: str = "auto",
+    vad_filter: bool = True,
+    beam_size: int = 3,
+    on_phrase: Optional[Callable[[str, str], None]] = None,
+) -> list[Phrase]:
+    """Transcribes an entire audio recording (WAV/MP3/etc.) using faster-whisper.
+
+    Args:
+        audio_path: Path to the audio file.
+        model_size: Faster-whisper model size (e.g., 'base.en', 'small.en').
+        language: BCP-47 language tag or code (e.g., 'en-US', 'en').
+        device: Hardware device ('auto', 'cuda', 'cpu').
+        vad_filter: Whether to apply Silero VAD to filter non-speech noise.
+        beam_size: Beam search width (default: 3).
+        on_phrase: Optional callback invoked with (timestamp_offset, text) for each phrase.
+
+    Returns:
+        List of Phrase(timestamp_offset, text) instances with timestamps.
+    """
+    path = Path(audio_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    model = get_whisper_model(model_size=model_size, device=device)
+    if model is None:
+        raise RuntimeError(
+            "faster-whisper is not available. Please ensure faster-whisper is installed."
+        )
+
+    lang = language.split("-")[0].lower() if language else "en"
+    segments, _ = model.transcribe(
+        str(path),
+        language=lang,
+        vad_filter=vad_filter,
+        beam_size=beam_size,
+    )
+
+    phrases: list[Phrase] = []
+    for s in segments:
+        text = s.text.strip()
+        if not text:
+            continue
+        start_sec = max(0.0, float(s.start))
+        hours = int(start_sec // 3600)
+        minutes = int((start_sec % 3600) // 60)
+        seconds = int(start_sec % 60)
+        timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        phrase = Phrase(timestamp, text)
+        phrases.append(phrase)
+        if on_phrase:
+            try:
+                on_phrase(timestamp, text)
+            except Exception as e:
+                logger.error(f"Error in on_phrase callback: {e}")
+
+    return phrases
 
 
 def main():

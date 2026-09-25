@@ -44,6 +44,10 @@ class LiveSession:
         boost_distant: bool = True,
         max_gain: float = 8.0,
         input_device_index: Optional[int] = None,
+        transcriber_engine: str = "auto",
+        whisper_model: str = "base.en",
+        whisper_device: str = "auto",
+        refine_from_audio: bool = False,
     ):
         self.base_dir = Path(output_dir)
         self.title = title.strip() if title and title.strip() else None
@@ -58,6 +62,10 @@ class LiveSession:
         self.boost_distant = boost_distant
         self.max_gain = max_gain
         self.input_device_index = input_device_index
+        self.transcriber_engine = transcriber_engine
+        self.whisper_model = whisper_model
+        self.whisper_device = whisper_device
+        self.refine_from_audio = refine_from_audio
 
         # Route audio and notes to their respective subdirectories
         self.audio_dir = Path(audio_dir) if audio_dir is not None else self.base_dir / "audio"
@@ -80,6 +88,9 @@ class LiveSession:
             calibration_duration=self.calibration_duration,
             boost_distant=self.boost_distant,
             max_gain=self.max_gain,
+            engine=self.transcriber_engine,
+            whisper_model=self.whisper_model,
+            device=self.whisper_device,
             on_phrase=self._handle_sentence,
         )
 
@@ -196,6 +207,58 @@ class LiveSession:
 
         return self.wav_path, self.md_path
 
+    def _rewrite_transcript_with_phrases(
+        self, phrases: list, end_datetime: datetime, duration_str: str
+    ) -> None:
+        """Rewrites markdown transcript using high-accuracy post-session transcribed phrases."""
+        if not self.md_path:
+            return
+
+        speaker_prefix = f"{self.speaker}: " if self.speaker else ""
+        title_str = (
+            self.title
+            if self.title
+            else f"Lecture Notes - {self._start_datetime.strftime('%Y-%m-%d %H:%M:%S') if self._start_datetime else ''}"
+        )
+        wav_str = self.wav_path.as_posix() if self.wav_path else ""
+        date_str = (
+            self._start_datetime.strftime("%A, %B %d, %Y")
+            if self._start_datetime
+            else ""
+        )
+        start_time_str = (
+            self._start_datetime.strftime("%H:%M:%S")
+            if self._start_datetime
+            else ""
+        )
+
+        lines = [
+            f"# {title_str}\n",
+        ]
+        if self.title:
+            lines.append(f"- **Course / Topic:** {self.title}")
+        lines.extend([
+            f"- **Audio Recording:** `{wav_str}`",
+            f"- **Date:** {date_str}",
+            f"- **Session Started:** {start_time_str}",
+            f"- **Speaker:** {self.speaker}",
+            f"- **Language:** {self.language}\n",
+            f"---\n",
+            f"## Live Transcript\n\n",
+        ])
+        for phrase in phrases:
+            lines.append(f"- **[{phrase.timestamp_offset}]** {speaker_prefix}{phrase.text}")
+
+        lines.extend([
+            f"\n---\n\n",
+            f"## Session Summary\n\n",
+            f"- **Session Ended:** {end_datetime.strftime('%H:%M:%S')}\n",
+            f"- **Duration:** {duration_str}\n",
+            f"- **Total Sentences Captured:** {len(phrases)}\n",
+        ])
+
+        self.md_path.write_text("\n".join(lines), encoding="utf-8")
+
     def stop(self) -> tuple[Optional[Path], Optional[Path]]:
         """Gracefully stops transcription and recording, appends a session
 
@@ -214,7 +277,7 @@ class LiveSession:
         duration_sec = int(time.time() - self._start_time) if self._start_time else 0
         duration_str = time.strftime("%H:%M:%S", time.gmtime(duration_sec))
 
-        # Write summary footer and flush
+        # Write summary footer and flush active handle
         with self._lock:
             if self._md_file and not self._md_file.closed:
                 footer_text = (
@@ -231,6 +294,24 @@ class LiveSession:
                 except OSError:
                     pass
                 self._md_file.close()
+
+        # Optional full WAV audio refinement pass using faster-whisper
+        if self.refine_from_audio and final_wav and Path(final_wav).exists():
+            try:
+                from transcriber import transcribe_file
+                refined_phrases = transcribe_file(
+                    final_wav,
+                    model_size=self.whisper_model,
+                    language=self.language,
+                    device=self.whisper_device,
+                )
+                if refined_phrases:
+                    self._rewrite_transcript_with_phrases(
+                        refined_phrases, end_datetime, duration_str
+                    )
+                    self.sentence_count = len(refined_phrases)
+            except Exception as e:
+                print(f"\n[Warning] Audio refinement pass skipped: {e}")
 
         # Generate post-lecture study notes (summarizer.py)
         if self.auto_summarize and self.md_path and self.md_path.exists():

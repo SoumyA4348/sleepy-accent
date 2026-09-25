@@ -201,3 +201,99 @@ def test_boost_and_normalize_audio_silence():
     assert np.max(np.abs(result_samples)) < 100
 
 
+def test_get_whisper_model_cache():
+    """Verifies get_whisper_model caches loaded instances."""
+    from transcriber import get_whisper_model, _whisper_model_cache
+
+    with patch("transcriber.WhisperModel") as mock_wm:
+        mock_instance = MagicMock()
+        mock_wm.return_value = mock_instance
+        _whisper_model_cache.clear()
+
+        # First call loads model
+        m1 = get_whisper_model("base.en", device="cpu")
+        assert m1 is not None
+
+        # Second call returns cached instance
+        m2 = get_whisper_model("base.en", device="cpu")
+        assert m1 is m2
+        assert mock_wm.call_count == 1
+
+
+def test_transcribe_file(tmp_path):
+    """Verifies transcribe_file returns formatted Phrase objects."""
+    import wave
+    from transcriber import transcribe_file, Phrase
+
+    # Create a small valid WAV file
+    fake_wav = tmp_path / "test_lecture.wav"
+    with wave.open(str(fake_wav), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(b"\x00\x00" * 16000)
+
+    # Mock segment
+    mock_seg1 = MagicMock()
+    mock_seg1.start = 5.2
+    mock_seg1.end = 8.5
+    mock_seg1.text = "Hello and welcome to CIS2520."
+
+    mock_seg2 = MagicMock()
+    mock_seg2.start = 65.0
+    mock_seg2.end = 70.0
+    mock_seg2.text = "Today we will cover binary search trees."
+
+    with patch("transcriber.get_whisper_model") as mock_get_model:
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ([mock_seg1, mock_seg2], MagicMock())
+        mock_get_model.return_value = mock_model
+
+        phrases = transcribe_file(fake_wav, model_size="base.en")
+        assert len(phrases) == 2
+        assert isinstance(phrases[0], Phrase)
+        assert phrases[0].timestamp_offset == "00:00:05"
+        assert phrases[0].text == "Hello and welcome to CIS2520."
+        assert phrases[1].timestamp_offset == "00:01:05"
+        assert phrases[1].text == "Today we will cover binary search trees."
+
+
+def test_session_refine_from_audio(tmp_path):
+    """Verifies LiveSession.stop re-transcribes audio when refine_from_audio=True."""
+    from session import LiveSession
+    from transcriber import Phrase
+
+    session = LiveSession(
+        output_dir=tmp_path,
+        title="Refine Test",
+        refine_from_audio=True,
+        auto_summarize=False,
+    )
+
+    fake_wav = tmp_path / "audio" / "lecture_refine.wav"
+    fake_wav.parent.mkdir(parents=True, exist_ok=True)
+    fake_wav.touch()
+
+    with patch.object(session.recorder, "start", return_value=fake_wav), \
+         patch.object(session.recorder, "stop", return_value=fake_wav), \
+         patch.object(session.transcriber, "calibrate"), \
+         patch.object(session.transcriber, "start"), \
+         patch.object(session.transcriber, "stop"), \
+         patch("transcriber.transcribe_file") as mock_transcribe_file:
+
+        refined = [
+            Phrase("00:00:02", "Refined sentence one."),
+            Phrase("00:00:15", "Refined sentence two."),
+        ]
+        mock_transcribe_file.return_value = refined
+
+        session.start()
+        session.stop()
+
+        assert session.sentence_count == 2
+        content = session.md_path.read_text(encoding="utf-8")
+        assert "Refined sentence one." in content
+        assert "Refined sentence two." in content
+        assert "- **Total Sentences Captured:** 2" in content
+
+
