@@ -30,6 +30,7 @@ sleepy-accent/
 ├── session.py        # Live session coordinator & real-time markdown logger
 ├── summarizer.py     # Post-speech cleaner & executive briefing synthesizer
 ├── main.py           # Single interactive CLI entrypoint
+├── requirements.txt  # Project dependencies
 ├── tests/            # Automated test suite (pytest)
 └── sessions/
     ├── audio/        # Raw .wav audio recordings (full backup)
@@ -41,18 +42,15 @@ sleepy-accent/
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-Python 3.10+ with `pyaudio` and `speechrecognition`:
+Python 3.10+ installed. Install dependencies using `requirements.txt`:
 
 ```bash
-pip install pyaudio SpeechRecognition
+pip install -r requirements.txt
 ```
 
-*(Optional: for enhanced terminal styling)*
-```bash
-pip install colorama
-```
+*(Or install core packages manually: `pip install pyaudio SpeechRecognition faster-whisper colorama pytest`)*
 
-### 2. Run at an Event
+### 2. Live Capture at an Event
 
 ```bash
 python main.py
@@ -68,6 +66,19 @@ python main.py
 4. Press **`q`** or **`Ctrl+C`** when the session concludes.
 5. `sleepy-accent` instantly finalizes your transcript and generates an executive session summary.
 
+### 3. Transcribe an Existing Audio File
+
+Transcribe pre-recorded lecture or conference audio directly (`.wav`, `.mp3`, etc.) without microphone recording:
+
+```bash
+python main.py --transcribe-file path/to/recording.wav
+```
+
+You can customize the model size, language, or session title:
+```bash
+python main.py --transcribe-file keynote.wav --whisper-model small.en --session "AI Keynote"
+```
+
 ---
 
 ## ⚙️ CLI Options
@@ -82,7 +93,11 @@ python main.py --help
 | `-s, --speaker` | Speaker prefix label in live log | `Speaker` |
 | `-o, --output-dir` | Directory for audio recordings and notes | `sessions` |
 | `-l, --language` | Speech recognition language code | `en-US` |
-| `--calibrate-sec`| Duration (seconds) for ambient hall noise calibration | `1.5` |
+| `--engine` | Recognition engine: `whisper` (local), `google`, or `auto` | `auto` |
+| `--whisper-model` | Model size for faster-whisper (`tiny.en`, `base.en`, `small.en`, `medium.en`) | `base.en` |
+| `--refine` | Perform post-session full audio refinement pass with Whisper on saved WAV | `False` |
+| `--transcribe-file` | Transcribe an existing audio file (`.wav`, `.mp3`, etc.) directly without recording | `None` |
+| `--calibrate-sec` | Duration (seconds) for ambient hall noise calibration | `1.5` |
 | `--max-gain` | Maximum AGC gain multiplier for distant podium audio | `8.0` |
 | `--no-boost` | Disable automatic gain boost for close/front-row audio | `False` |
 | `-p, --provider` | Recap LLM provider (`auto`, `gemini`, `openai`, `ollama`, `heuristic`) | `auto` |
