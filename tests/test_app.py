@@ -45,9 +45,9 @@ def test_wait_for_start(monkeypatch):
 def test_recorder_filename_prefix(tmp_path):
     """Verifies AudioRecorder applies custom filename prefixes correctly."""
     recorder = AudioRecorder(output_dir=tmp_path)
-    with patch.object(recorder, "_pyaudio"), \
-         patch.object(recorder, "_stream"), \
+    with patch("sleepy_accent.recorder.pyaudio.PyAudio") as mock_pyaudio, \
          patch("wave.open") as mock_wave:
+        mock_pyaudio.return_value.open.return_value = MagicMock()
         mock_wave.return_value = MagicMock()
         path = recorder.start(filename_prefix="lecture_CIS2520 - Data Structures")
         assert "CIS2520" in path.name
