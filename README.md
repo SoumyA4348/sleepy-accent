@@ -1,82 +1,106 @@
 # sleepy-accent 🎙️⚡
 
-> *"Real-time speech capture & intelligence for public speeches, conference keynotes, and high-stakes sessions."*
+> Real-time speech transcription and automated note-taking for lectures, talks, and presentations.
 
 > [!WARNING]
 > **Recording Consent & Session Privacy Notice**:
-> This tool is designed for authorized transcription, personal note-taking, and accessibility during public speeches, conferences, and open sessions. For private or Chatham House Rule sessions, always ensure compliance with event policies, local recording consent regulations, and speaker privacy guidelines prior to recording.
+> This tool is designed for authorized transcription, personal note-taking, and accessibility during public speeches, lectures, and open presentations. Always ensure compliance with local recording consent regulations and event speaker guidelines prior to recording.
 
-A lightweight, terminal-native live speech recorder and real-time audio transcriber. Captures spoken audio directly from your laptop or external microphone, streams live transcriptions with timestamps to your console, auto-saves every phrase to disk in real-time, and synthesizes structured executive session recaps (core arguments, key announcements, metrics, and actionable takeaways).
+A lightweight Python tool that listens through your laptop or external microphone, prints live transcriptions to your terminal with timestamps, automatically saves everything to markdown files, and generates a clean bullet-point summary so you don't miss anything.
+
+Built to solve a real everyday problem: when sitting in a large lecture hall listening to a speaker who talks fast or has an unfamiliar accent, it's easy to miss key points—especially when you're tired. `sleepy-accent` boosts quiet audio, transcribes speech live, and gives you clean notes.
 
 ---
 
 ## ⚡ Features
 
-* **Live Stage Audio Capture & Auto-Archiving:** Streams 16kHz PCM audio while continuously saving an uncompressed backup `.wav` file (`sessions/audio/`).
-* **Global Accent & Fast-Cadence Resilient:** Purpose-built to decipher rapid delivery and diverse international accents across global conferences and technical keynotes.
-* **Auditorium Distance & Voice Booster:** Built-in dynamic Automatic Gain Control (AGC) and DC-offset filtering that amplifies distant stage or podium voices (up to 8.0x / +18 dB) without clipping.
-* **Continuous Real-Time Flush:** Writes incoming phrases directly to markdown (`sessions/notes/`) as they are spoken—zero data loss if your laptop sleeps or battery dies.
-* **Executive Recap Synthesis:** Automatically parses raw transcripts into polished briefings, extracting key announcements, strategic insights, definitions, and action points via Gemini, OpenAI, Ollama, or local heuristic fallback.
-* **Zero Bloat & Battery Friendly:** Pure Python background threading without heavy GPU dependencies—keeps your laptop cold and silent in quiet auditoriums.
+* **Live Mic Capture & Backup:** Streams audio from your microphone and saves an uncompressed `.wav` backup in the background (`sessions/audio/`).
+* **Built-in Voice Booster:** Automatically boosts quiet or distant voices (up to 8.0x gain) so you can still capture audio from the back of the room.
+* **Fast Local Transcription:** Uses `faster-whisper` locally for quick speech-to-text with timestamped console output—without needing a powerful GPU.
+* **Auto-Save Markdown Logs:** Flushes text to disk (`sessions/notes/`) phrase by phrase in real time, so nothing is lost if your laptop battery dies.
+* **Clean Session Recaps:** Summarizes the full session transcript into key points, definitions, and action items using Gemini API (with a local fallback if offline).
+* **Lightweight & Battery-Friendly:** Runs in background Python threads with low CPU usage so your laptop stays cool and quiet during long sessions.
 
 ---
 
-## 📦 Architecture
+## 📦 Project layout
 
 ```
 sleepy-accent/
-├── recorder.py       # Background mic capture & parallel audio file writer
-├── transcriber.py    # Speech-to-text worker with noise calibration, AGC & accent handling
-├── session.py        # Live session coordinator & real-time markdown logger
-├── summarizer.py     # Post-speech cleaner & executive briefing synthesizer
-├── main.py           # Single interactive CLI entrypoint
-├── requirements.txt  # Project dependencies
-├── tests/            # Automated test suite (pytest)
+├── src/
+│   └── sleepy_accent/
+│       ├── main.py       # Interactive CLI entrypoint
+│       ├── recorder.py   # Background microphone capture
+│       ├── session.py    # Session coordinator and markdown logger
+│       ├── summarizer.py  # Study-note generator
+│       └── transcriber.py # Speech-to-text worker
+├── tests/                # Automated test suite
+├── pyproject.toml        # Packaging, CLI, and test configuration
+├── requirements.txt      # Direct pip-install requirements
+├── .github/workflows/    # Continuous integration
 └── sessions/
     ├── audio/        # Raw .wav audio recordings (full backup)
-    └── notes/        # Live transcript logs & generated executive recaps
+    ├── notes/        # Live transcript logs
+    └── study_notes/  # Generated study summaries
 ```
+
+Session output directories are intentionally ignored by Git because they may contain
+private recordings, transcripts, or notes.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Prerequisites
-Python 3.10+ installed. Install dependencies using `requirements.txt`:
+### 1. Install
+
+Python 3.10+ is required. For normal use, install the package in editable mode:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-*(Or install core packages manually: `pip install pyaudio SpeechRecognition faster-whisper colorama pytest`)*
-
-### 2. Live Capture at an Event
+For development and tests:
 
 ```bash
-python main.py
+python -m pip install -e ".[dev]"
 ```
 
-1. Enter your event/session name (e.g. `Tech Summit 2026 - AI Keynote`) or press **Enter** for a default timestamped title.
-2. Press **Enter** to calibrate auditorium ambient noise and begin live capture.
+The legacy requirements file remains available for environments that use
+`pip install -r requirements.txt`.
+
+### 2. Live Capture at a Talk or Lecture
+
+```bash
+sleepy-accent
+```
+
+You can also run the CLI without installing the console script:
+
+```bash
+python -m sleepy_accent
+```
+
+1. Enter your session name (e.g. `Algorithms Lecture - Week 4`) or press **Enter** for a default timestamped title.
+2. Press **Enter** to calibrate ambient room noise and begin live capture.
 3. Transcriptions stream live onto your terminal with session timestamps:
    ```
-   [00:04:12] Speaker: Today we are announcing our next-generation distributed inference engine.
-   [00:04:35] Speaker: The primary benchmark demonstrates a 3.4x reduction in per-token latency.
+   [00:04:12] Speaker: Today we are going to cover graph traversal and Dijkstra's algorithm.
+   [00:04:35] Speaker: Make sure to notice how priority queues change the runtime complexity.
    ```
 4. Press **`q`** or **`Ctrl+C`** when the session concludes.
-5. `sleepy-accent` instantly finalizes your transcript and generates an executive session summary.
+5. `sleepy-accent` saves your full transcript and generates a clean summary with key points and definitions.
 
 ### 3. Transcribe an Existing Audio File
 
 Transcribe pre-recorded lecture or conference audio directly (`.wav`, `.mp3`, etc.) without microphone recording:
 
 ```bash
-python main.py --transcribe-file path/to/recording.wav
+sleepy-accent --transcribe-file path/to/recording.wav
 ```
 
 You can customize the model size, language, or session title:
 ```bash
-python main.py --transcribe-file keynote.wav --whisper-model small.en --session "AI Keynote"
+sleepy-accent --transcribe-file keynote.wav --whisper-model small.en --session "AI Keynote"
 ```
 
 ---
@@ -84,7 +108,7 @@ python main.py --transcribe-file keynote.wav --whisper-model small.en --session 
 ## ⚙️ CLI Options
 
 ```bash
-python main.py --help
+sleepy-accent --help
 ```
 
 | Flag | Description | Default |
@@ -101,7 +125,7 @@ python main.py --help
 | `--max-gain` | Maximum AGC gain multiplier for distant podium audio | `8.0` |
 | `--no-boost` | Disable automatic gain boost for close/front-row audio | `False` |
 | `-p, --provider` | Recap LLM provider (`auto`, `gemini`, `openai`, `ollama`, `heuristic`) | `auto` |
-| `--no-recap` | Skip generating executive recap at conclusion | `False` |
+| `--no-recap` | Skip generating summary at conclusion | `False` |
 | `-y, --yes` | Skip confirmation and start listening immediately | `False` |
 
 ---
@@ -109,7 +133,7 @@ python main.py --help
 ## 🧪 Running Tests
 
 ```bash
-pytest
+python -m pytest
 ```
 
 ---

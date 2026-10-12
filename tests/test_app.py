@@ -4,10 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-from main import prompt_course_name, wait_for_start, display_recap_summary
-from recorder import AudioRecorder
-from session import LiveSession
-from summarizer import StudyNoteGenerator
+from sleepy_accent.main import prompt_course_name, wait_for_start, display_recap_summary
+from sleepy_accent.recorder import AudioRecorder
+from sleepy_accent.session import LiveSession
+from sleepy_accent.summarizer import StudyNoteGenerator
 
 
 def test_prompt_course_name_custom(monkeypatch):
@@ -127,7 +127,7 @@ def test_display_recap_summary(tmp_path, capsys):
 
 def test_run_cli_full_cycle(tmp_path, monkeypatch, capsys):
     """Verifies run_cli executes, captures args, runs session, and displays recap."""
-    from main import run_cli
+    from sleepy_accent.main import run_cli
     import sys
 
     test_args = [
@@ -139,12 +139,12 @@ def test_run_cli_full_cycle(tmp_path, monkeypatch, capsys):
     ]
     monkeypatch.setattr(sys, "argv", test_args)
 
-    with patch("session.AudioRecorder.start") as mock_start, \
-         patch("session.AudioRecorder.stop") as mock_stop, \
-         patch("session.LiveTranscriber.calibrate"), \
-         patch("session.LiveTranscriber.start"), \
-         patch("session.LiveTranscriber.stop"), \
-         patch("main.start_stop_listener") as mock_listener:
+    with patch("sleepy_accent.session.AudioRecorder.start") as mock_start, \
+         patch("sleepy_accent.session.AudioRecorder.stop") as mock_stop, \
+         patch("sleepy_accent.session.LiveTranscriber.calibrate"), \
+         patch("sleepy_accent.session.LiveTranscriber.start"), \
+         patch("sleepy_accent.session.LiveTranscriber.stop"), \
+         patch("sleepy_accent.main.start_stop_listener") as mock_listener:
 
         fake_wav = tmp_path / "audio" / "lecture_test.wav"
         fake_wav.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +168,7 @@ def test_run_cli_full_cycle(tmp_path, monkeypatch, capsys):
 def test_boost_and_normalize_audio():
     """Verifies that quiet speech chunks are amplified up to max_gain while preserving limits."""
     import numpy as np
-    from transcriber import boost_and_normalize_audio
+    from sleepy_accent.transcriber import boost_and_normalize_audio
 
     # Create a low-amplitude sine wave simulating a distant professor (peak = 2000)
     t = np.linspace(0, 1, 16000, endpoint=False)
@@ -188,7 +188,7 @@ def test_boost_and_normalize_audio():
 def test_boost_and_normalize_audio_silence():
     """Verifies that pure room silence is not amplified excessively."""
     import numpy as np
-    from transcriber import boost_and_normalize_audio
+    from sleepy_accent.transcriber import boost_and_normalize_audio
 
     # Silence noise floor around 10
     silence = np.random.randint(-10, 10, size=1024, dtype=np.int16)
@@ -203,9 +203,9 @@ def test_boost_and_normalize_audio_silence():
 
 def test_get_whisper_model_cache():
     """Verifies get_whisper_model caches loaded instances."""
-    from transcriber import get_whisper_model, _whisper_model_cache
+    from sleepy_accent.transcriber import get_whisper_model, _whisper_model_cache
 
-    with patch("transcriber.WhisperModel") as mock_wm:
+    with patch("sleepy_accent.transcriber.WhisperModel") as mock_wm:
         mock_instance = MagicMock()
         mock_wm.return_value = mock_instance
         _whisper_model_cache.clear()
@@ -223,7 +223,7 @@ def test_get_whisper_model_cache():
 def test_transcribe_file(tmp_path):
     """Verifies transcribe_file returns formatted Phrase objects."""
     import wave
-    from transcriber import transcribe_file, Phrase
+    from sleepy_accent.transcriber import transcribe_file, Phrase
 
     # Create a small valid WAV file
     fake_wav = tmp_path / "test_lecture.wav"
@@ -244,7 +244,7 @@ def test_transcribe_file(tmp_path):
     mock_seg2.end = 70.0
     mock_seg2.text = "Today we will cover binary search trees."
 
-    with patch("transcriber.get_whisper_model") as mock_get_model:
+    with patch("sleepy_accent.transcriber.get_whisper_model") as mock_get_model:
         mock_model = MagicMock()
         mock_model.transcribe.return_value = ([mock_seg1, mock_seg2], MagicMock())
         mock_get_model.return_value = mock_model
@@ -260,8 +260,8 @@ def test_transcribe_file(tmp_path):
 
 def test_session_refine_from_audio(tmp_path):
     """Verifies LiveSession.stop re-transcribes audio when refine_from_audio=True."""
-    from session import LiveSession
-    from transcriber import Phrase
+    from sleepy_accent.session import LiveSession
+    from sleepy_accent.transcriber import Phrase
 
     session = LiveSession(
         output_dir=tmp_path,
@@ -279,7 +279,7 @@ def test_session_refine_from_audio(tmp_path):
          patch.object(session.transcriber, "calibrate"), \
          patch.object(session.transcriber, "start"), \
          patch.object(session.transcriber, "stop"), \
-         patch("transcriber.transcribe_file") as mock_transcribe_file:
+         patch("sleepy_accent.transcriber.transcribe_file") as mock_transcribe_file:
 
         refined = [
             Phrase("00:00:02", "Refined sentence one."),
@@ -295,5 +295,3 @@ def test_session_refine_from_audio(tmp_path):
         assert "Refined sentence one." in content
         assert "Refined sentence two." in content
         assert "- **Total Sentences Captured:** 2" in content
-
-

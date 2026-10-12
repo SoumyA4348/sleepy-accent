@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sleepy-accent"
+version = "0.1.0"
+description = "Real-time speech transcription and automated study-note generation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "SoumyA4348" }]
+dependencies = [
+    "pyaudio>=0.2.14",
+    "SpeechRecognition>=3.10.0",
+    "faster-whisper>=1.0.0",
+    "numpy>=1.24.0",
+    "colorama>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0"]
+
+[project.scripts]
+sleepy-accent = "sleepy_accent.main:run_cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra --basetemp=.pytest-tmp"

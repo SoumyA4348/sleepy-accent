@@ -16,8 +16,8 @@ import threading
 import time
 from typing import Optional, TextIO
 
-from recorder import AudioRecorder
-from transcriber import LiveTranscriber
+from .recorder import AudioRecorder
+from .transcriber import LiveTranscriber
 
 
 class LiveSession:
@@ -298,7 +298,7 @@ class LiveSession:
         # Optional full WAV audio refinement pass using faster-whisper
         if self.refine_from_audio and final_wav and Path(final_wav).exists():
             try:
-                from transcriber import transcribe_file
+                from .transcriber import transcribe_file
                 refined_phrases = transcribe_file(
                     final_wav,
                     model_size=self.whisper_model,
@@ -316,7 +316,7 @@ class LiveSession:
         # Generate post-lecture study notes (summarizer.py)
         if self.auto_summarize and self.md_path and self.md_path.exists():
             try:
-                from summarizer import StudyNoteGenerator
+                from .summarizer import StudyNoteGenerator
                 generator = StudyNoteGenerator(
                     output_dir=self.study_notes_dir,
                     provider=self.summarizer_provider,

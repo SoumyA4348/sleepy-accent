@@ -32,7 +32,7 @@ except ImportError:
     class Style:  # type: ignore
         BRIGHT = DIM = NORMAL = RESET_ALL = ""
 
-from session import LiveSession
+from .session import LiveSession
 
 
 def print_banner() -> None:
@@ -249,8 +249,8 @@ def run_cli():
 
     # Handler for transcribing pre-recorded audio files directly
     if args.transcribe_file:
-        from transcriber import transcribe_file
-        from summarizer import StudyNoteGenerator
+        from .transcriber import transcribe_file
+        from .summarizer import StudyNoteGenerator
 
         audio_file = Path(args.transcribe_file)
         if not audio_file.exists():

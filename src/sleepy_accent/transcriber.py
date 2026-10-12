@@ -18,6 +18,24 @@ from typing import Callable, Optional
 import numpy as np
 import speech_recognition as sr
 
+import os
+import sys
+
+# Ensure Windows PATH includes nvidia CUDA DLLs for ctranslate2 / faster-whisper CUDA execution
+if sys.platform == "win32":
+    try:
+        import site
+        _extra = []
+        for _sp in site.getsitepackages():
+            for _sub in ["nvidia\\cublas\\bin", "nvidia\\cuda_runtime\\bin", "nvidia\\cuda_nvrtc\\bin"]:
+                _p = os.path.join(_sp, _sub)
+                if os.path.isdir(_p):
+                    _extra.append(_p)
+        if _extra:
+            os.environ["PATH"] = os.pathsep.join(_extra) + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
+
 try:
     from faster_whisper import WhisperModel
 except ImportError:
@@ -25,7 +43,7 @@ except ImportError:
 
 # Optional import of AudioRecorder for standalone / integration mode
 try:
-    from recorder import AudioRecorder
+    from .recorder import AudioRecorder
 except ImportError:
     AudioRecorder = None
 
